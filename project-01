@@ -1,0 +1,99 @@
+import requests
+from urllib.parse import urlparse, urljoin
+from xml.etree import ElementTree
+import csv
+
+
+def get_robots_url(website):
+    parsed_url = urlparse(website)
+    robots_url = f"{parsed_url.scheme}://{parsed_url.netloc}/robots.txt"
+    return robots_url
+
+
+def get_sitemap_url(website):
+    robots_url = get_robots_url(website)
+    try:
+        response = requests.get(robots_url)
+        response.raise_for_status()
+        if 'sitemap' in response.text:
+            for line in response.text.splitlines():
+                if line.strip().startswith("Sitemap:"):
+                    sitemap_url = line.split(":")[1].strip()
+                    # Make sure to join it to form a complete URL
+                    return urljoin(robots_url, sitemap_url)
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching robots.txt: {e}")
+    return None
+
+
+def get_sitemap(sitemap_url):
+    try:
+        response = requests.get(sitemap_url)
+        response.raise_for_status()
+        return response.text
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching sitemap: {e}")
+    return None
+
+
+def get_blog_urls_from_sitemap(sitemap_url):
+    sitemap_data = get_sitemap(sitemap_url)
+    blog_urls = []
+    if sitemap_data:
+        try:
+            root = ElementTree.fromstring(sitemap_data)
+            for url in root.findall(".//url"):
+                loc = url.find("loc").text
+                if loc and '/blog/' in loc:
+                    blog_urls.append(loc)
+        except ElementTree.ParseError as e:
+            print(f"Error parsing sitemap XML: {e}")
+    return blog_urls
+
+
+def get_blog_title(blog_url):
+    try:
+        response = requests.get(blog_url)
+        response.raise_for_status()
+        start = response.text.find('<title>') + len('<title>')
+        end = response.text.find('</title>', start)
+        if start != -1 and end != -1:
+            return response.text[start:end]
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching blog page {blog_url}: {e}")
+    return "Title not found"
+
+
+def save_blog_urls_to_csv(blog_urls):
+    with open('blog_posts.csv', mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        writer.writerow(['URL', 'Title'])
+        for url in blog_urls:
+            title = get_blog_title(url)
+            writer.writerow([url, title])
+    print("Blog post URLs and titles have been saved to blog_posts.csv.")
+
+
+def main():
+    website = input("Enter the website URL (e.g., https://example.com): ").strip()
+
+    print("Fetching robots.txt...")
+    robots_url = get_robots_url(website)
+    if robots_url:
+        print("robots.txt fetched successfully.")
+        sitemap_url = get_sitemap_url(website)
+        if sitemap_url:
+            print(f"Sitemap found at: {sitemap_url}")
+            blog_urls = get_blog_urls_from_sitemap(sitemap_url)
+            if blog_urls:
+                save_blog_urls_to_csv(blog_urls)
+            else:
+                print("No blog URLs found in the sitemap.")
+        else:
+            print("Could not retrieve the sitemap.")
+    else:
+        print("Could not fetch robots.txt.")
+
+
+if __name__ == "__main__":
+    main()
